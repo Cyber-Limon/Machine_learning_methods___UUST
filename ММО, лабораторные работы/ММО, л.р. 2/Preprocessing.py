@@ -3,22 +3,43 @@ import random
 import numpy  as np
 import pandas as pd
 
-from sklearn.preprocessing   import StandardScaler
-from sklearn.model_selection import train_test_split
+from pymatgen.core                    import Element, Composition
+from sklearn.preprocessing            import StandardScaler
+from sklearn.model_selection          import train_test_split
+from matminer.featurizers.composition import ElementProperty, Meredig
 
 
 
-def loading_data(path, compound_range, properties_range):
-    compound  = pd.read_excel(path, usecols=compound_range)
-    compound  = compound.values.tolist()
-    compound  = np.array(compound)
+def loading_data(path, compounds_range, properties_range, modification = None):
+    compounds  = pd.read_excel(path, usecols=compounds_range)
+    compounds  = compounds.values.tolist()
+    compounds  = np.array(compounds)
 
     properties = pd.read_excel(path, usecols=properties_range)
     properties = properties.values.tolist()
     properties = np.array(properties)
 
+
+    if modification is not None:
+        compounds_names = pd.read_excel(path, nrows=0, usecols=compounds_range)
+        compounds_names = compounds_names.columns.tolist()
+
+        compositions = atomic_fractions(compounds, compounds_names)
+
+        if modification == "magpie":
+            feat = ElementProperty.from_preset(preset_name="magpie", impute_nan=True)
+        else:
+            feat = Meredig()
+
+        feat.set_n_jobs(1)
+        modifications = feat.featurize_many(compositions, ignore_errors=True)
+
+        compounds = np.array(modifications)
+        #compounds = np.hstack([compounds, modifications])
+
+
     X_train, X_test, y_train, y_test = train_test_split(
-        compound, properties,
+        compounds, properties,
         test_size=0.2,
         random_state=1107)
 
@@ -26,30 +47,65 @@ def loading_data(path, compound_range, properties_range):
 
 
 
+def atomic_fractions(compounds, compounds_names):
+    result = []
+
+    for compound in compounds:
+        modified = []
+        for i in range(len(compound)):
+            modified.append(compound[i] / float(Element(compounds_names[i]).atomic_mass))
+
+        total       = sum(modified)
+
+        composition = {}
+        for i in range(len(modified)):
+            if modified[i] > 0:
+                composition[compounds_names[i]] = modified[i] / total
+
+        result.append(Composition(composition))
+
+    return result
+
+
+
 def normalization(X_train, X_test, y_train, y_test):
+    X_train = np.asarray(X_train)
+    X_test  = np.asarray(X_test)
+    y_train = np.asarray(y_train)
+    y_test  = np.asarray(y_test)
+
     scaler_X = StandardScaler()
     X_train  = scaler_X.fit_transform(X_train)
     X_test   = scaler_X.transform(X_test)
 
     scaler_Y = StandardScaler()
-    y_train  = scaler_Y.fit_transform(y_train)
-    y_test   = scaler_Y.transform(y_test)
+    if y_train.ndim == 1:
+        y_train = scaler_Y.fit_transform(y_train.reshape(-1, 1)).ravel()
+        y_test  = scaler_Y.transform(y_test.reshape(-1, 1)).ravel()
+    else:
+        y_train  = scaler_Y.fit_transform(y_train)
+        y_test   = scaler_Y.transform(y_test)
 
     return X_train, X_test, y_train, y_test
 
 
 
-def augmentation(X, y, quantity, bias, material_property):
-    X_current = []
-    y_current = []
+def cleaning(X, y, material_property):
+    X_clean = []
+    y_clean = []
 
     for material in range(len(X)):
         if y[material][material_property] != 0:
-            X_current.append(X[material])
-            y_current.append(y[material][material_property])
+            X_clean.append(X[material])
+            y_clean.append(y[material][material_property])
 
-    X_aug = list(X_current.copy())
-    y_aug = list(y_current.copy())
+    return X_clean, y_clean
+
+
+
+def augmentation(X, y, quantity, bias, material_property):
+    X_current, y_current = cleaning(X, y, material_property)
+    X_aug,     y_aug     = X_current.copy(), y_current.copy()
 
     while len(X_aug) < quantity:
         material  = random.randint(0, len(X_current) - 1)

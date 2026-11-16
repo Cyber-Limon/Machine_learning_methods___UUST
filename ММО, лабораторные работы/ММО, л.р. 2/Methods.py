@@ -1,7 +1,8 @@
 import numpy as np
 
-from Preprocessing   import augmentation
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+from Preprocessing           import normalization, cleaning, augmentation
+from sklearn.metrics         import r2_score, mean_absolute_error, mean_squared_error
+from sklearn.model_selection import cross_validate
 
 
 
@@ -134,6 +135,21 @@ def model_evaluation(model, X_train, X_test, y_train, y_test):
     score.append(mean_absolute_error(y_test, y_pred))
     score.append(mean_squared_error(y_test, y_pred) ** 0.5)
 
+    """
+    scoring = {
+        'r2': 'r2',
+        'mae': 'neg_mean_absolute_error',
+        'rmse': 'neg_root_mean_squared_error',
+    }
+
+    res   = cross_validate(model, X_train, y_train, cv=5, scoring=scoring)
+    score = [
+        np.mean(res['test_r2']),
+        -np.mean(res['test_mae']),
+        -np.mean(res['test_rmse']),
+    ]
+    """
+
     return score
 
 
@@ -155,7 +171,7 @@ def all_methods(X_train, X_test, y_train, y_test):
 
 
 
-def ensemble(method, quantity, bias, X_train, X_test, y_train, y_test):
+def ensemble(method, X_train, X_test, y_train, y_test, with_normalization, quantity = 0, bias = 0):
     if method == method_SVR:
         method = method_SVR_ensemble
 
@@ -164,8 +180,11 @@ def ensemble(method, quantity, bias, X_train, X_test, y_train, y_test):
     RMSE = []
 
     for material_property in range(len(y_train[0])):
-        X_train_current, y_train_current = augmentation(X_train, y_train, quantity,      bias, material_property)
-        X_test_current,  y_test_current  = augmentation(X_test,  y_test,  quantity // 4, bias, material_property)
+        X_train_current, y_train_current = augmentation(X_train, y_train, quantity, bias, material_property)
+        X_test_current,  y_test_current  = cleaning(X_test, y_test, material_property)
+
+        if with_normalization:
+            X_train_current, X_test_current, y_train_current, y_test_current = normalization(X_train_current, X_test_current, y_train_current, y_test_current)
 
         X_train_current = np.array(X_train_current)
         X_test_current  = np.array(X_test_current)
@@ -181,15 +200,4 @@ def ensemble(method, quantity, bias, X_train, X_test, y_train, y_test):
         MAE.append(score[1])
         RMSE.append(score[2])
 
-    return [sum(R_2) / len(R_2), sum(MAE) / len(MAE), sum(RMSE) / len(RMSE)]
-
-
-
-def all_ensembles(quantity, bias, X_train, X_test, y_train, y_test):
-    scores = []
-
-    for method in method_names:
-        method = globals()["method_" + method]
-        scores.append(ensemble(method, quantity, bias, X_train, X_test, y_train, y_test))
-
-    return scores
+    return [R_2, MAE, RMSE]
